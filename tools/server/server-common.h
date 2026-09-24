@@ -479,6 +479,14 @@ struct server_metrics {
     uint64_t n_draft_verif_steps = 0; // Total draft token verification steps by the target model
     std::vector<uint64_t> n_accepted_per_pos; // Accepted tokens per draft position
 
+    // KV cache metrics (approximate, set in SERVER_TASK_TYPE_METRICS handler)
+    uint32_t kvcache_capacity_tokens = 0;  // llama_n_ctx() total KV cache capacity
+    uint32_t kvcache_used_tokens     = 0;  // sum of slot.prompt.n_tokens() for processing slots
+
+    // memory metrics (set via llama_get_memory_breakdown)
+    uint64_t memory_context_bytes = 0;  // context/KV cache buffers across all devices
+    uint64_t memory_model_bytes   = 0;  // model weights across all devices
+
     void init() {
         t_start = ggml_time_us();
     }

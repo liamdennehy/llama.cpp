@@ -505,6 +505,7 @@ struct server_task_result_metrics : server_task_result {
         double value; // prometheus values are always float64
     };
     std::string to_metrics();
+    std::string to_metrics_int();
 };
 
 // used by /slots API

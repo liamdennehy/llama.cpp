@@ -11,6 +11,7 @@
 #include "common.h"
 #include "fit.h"
 #include "llama.h"
+#include "../src/llama-ext.h"
 #include "log.h"
 #include "sampling.h"
 #include "speculative.h"
@@ -2492,6 +2493,32 @@ private:
                         }
                     }
                     SRV_DBG("n_processing_slots = %d\n", n_processing_slots);
+
+                    // KV cache utilization metrics (approximate)
+                    if (!slots.empty() && slots[0].ctx_tgt) {
+                        metrics.kvcache_capacity_tokens = llama_n_ctx(slots[0].ctx_tgt);
+
+                        uint64_t n_used = 0;
+                        for (const server_slot & slot : slots) {
+                            if (slot.is_processing()) {
+                                n_used += slot.prompt.n_tokens();
+                            }
+                        }
+                        // cap at capacity since per-slot sum can exceed it in unified KV mode
+                        metrics.kvcache_used_tokens = (uint32_t)std::min(n_used, (uint64_t)metrics.kvcache_capacity_tokens);
+                    }
+
+                    // Memory metrics via llama_get_memory_breakdown
+                    metrics.memory_context_bytes = 0;
+                    metrics.memory_model_bytes   = 0;
+                    if (slots[0].ctx_tgt) {
+                        const auto memory_breakdown = llama_get_memory_breakdown(slots[0].ctx_tgt);
+                        for (const auto & buft_mb : memory_breakdown) {
+                            const auto & mb = buft_mb.second;
+                            metrics.memory_context_bytes += mb.context;
+                            metrics.memory_model_bytes   += mb.model;
+                        }
+                    }
 
                     auto res = std::make_unique<server_task_result_metrics>();
                     res->id                  = task.id;

@@ -2499,9 +2499,11 @@ private:
                         metrics.kvcache_capacity_tokens = llama_n_ctx(slots[0].ctx_tgt);
 
                         uint64_t n_used = 0;
+                        metrics.kvcache_slots.clear();
                         for (const server_slot & slot : slots) {
                             if (slot.is_processing()) {
                                 n_used += slot.prompt.n_tokens();
+                                metrics.kvcache_slots.push_back({slot.id, (int)slot.state, (uint32_t)slot.prompt.n_tokens()});
                             }
                         }
                         // cap at capacity since per-slot sum can exceed it in unified KV mode
@@ -4682,15 +4684,31 @@ void server_routes::init_routes() {
             return res;
         }
 
+        // detect JSON accept header (case-insensitive)
+        bool json_output = false;
+        for (const auto & [key, value] : req.headers) {
+            std::string lowered_key(key.begin(), key.end());
+            std::transform(lowered_key.begin(), lowered_key.end(), lowered_key.begin(), [](unsigned char c) { return std::tolower(c); });
+            if (lowered_key == "accept" && value.find("application/json") != std::string::npos) {
+                json_output = true;
+                break;
+            }
+        }
+
         // render response using cached_metrics
         auto use_cached_metrics = [&]() {
             std::unique_lock<std::mutex> lock(mutex_cache);
             res->headers["Process-Start-Time-Unix"] = std::to_string(cached_metrics.t_start);
             server_task_result_metrics tmp;
             tmp.metrics = cached_metrics;
-            res->content_type = "text/plain; version=0.0.4";
             res->status = 200;
-            res->data = tmp.to_metrics();
+            if (json_output) {
+                res->content_type = "application/json";
+                res->data = tmp.to_json().dump();
+            } else {
+                res->content_type = "text/plain; version=0.0.4";
+                res->data = tmp.to_metrics();
+            }
             // the gauges are averaged over the window between two scrapes
             cached_metrics.reset_bucket();
             should_reset_buckets = true;
@@ -4729,9 +4747,14 @@ void server_routes::init_routes() {
             GGML_ASSERT(res_task != nullptr);
 
             res->headers["Process-Start-Time-Unix"] = std::to_string(res_task->metrics.t_start);
-            res->content_type = "text/plain; version=0.0.4";
             res->status = 200;
-            res->data = res_task->to_metrics();
+            if (json_output) {
+                res->content_type = "application/json";
+                res->data = res_task->to_json().dump();
+            } else {
+                res->content_type = "text/plain; version=0.0.4";
+                res->data = res_task->to_metrics();
+            }
         }
 
         return res;

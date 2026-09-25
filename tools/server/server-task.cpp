@@ -1517,8 +1517,64 @@ json server_task_result_slots::to_json() {
 }
 
 json server_task_result_metrics::to_json() {
-    // not used, /metrics renders prometheus text via to_metrics()
-    return json{};
+    double utilization = metrics.kvcache_capacity_tokens > 0
+        ? (double)metrics.kvcache_used_tokens / (double)metrics.kvcache_capacity_tokens * 100.0
+        : 0.0;
+
+    double prompt_tps = metrics.prompt_bucket.time > 0
+        ? (double)metrics.prompt_bucket.count / (double)metrics.prompt_bucket.time * 1e6
+        : 0.0;
+    double predict_tps = metrics.predict_bucket.time > 0
+        ? (double)metrics.predict_bucket.steps / (double)metrics.predict_bucket.time * 1e6
+        : 0.0;
+
+    double n_busy = metrics.n_decode > 0
+        ? (double)metrics.n_busy_slots / (double)metrics.n_decode
+        : 0.0;
+
+    json kvcache = json::object();
+    kvcache["capacity_tokens"] = metrics.kvcache_capacity_tokens;
+    kvcache["used_tokens"]    = metrics.kvcache_used_tokens;
+    kvcache["utilization"]    = utilization;
+    kvcache["slots"]          = json::array();
+    for (const auto & slot : metrics.kvcache_slots) {
+        kvcache["slots"].push_back(json{
+            {"slot",   slot.slot_id},
+            {"state",  slot.state},
+            {"tokens", slot.n_tokens},
+        });
+    }
+
+    return json{
+        {"n_processing_slots", n_processing_slots},
+        {"n_tasks_deferred",   n_tasks_deferred},
+        {"prompt", json{
+            {"tokens_total",         (double)metrics.prompt.count},
+            {"tokens_cached_total",  (double)metrics.n_prompt_cached},
+            {"seconds_total",        metrics.prompt.time / 1e6},
+            {"tokens_per_second",    prompt_tps},
+        }},
+        {"prediction", json{
+            {"tokens_total",         (double)metrics.predict.count},
+            {"seconds_total",        metrics.predict.time / 1e6},
+            {"tokens_per_second",    predict_tps},
+        }},
+        {"decode", json{
+            {"total",                (double)metrics.n_decode},
+            {"n_tokens_max",         (double)metrics.n_tokens_max},
+            {"busy_slots_per_decode", n_busy},
+            {"speculative", json{
+                {"draft_tokens_total",      (double)metrics.n_draft_tokens},
+                {"accepted_tokens_total",   (double)metrics.n_draft_accepted},
+                {"verification_steps_total", (double)metrics.n_draft_verif_steps},
+            }},
+        }},
+        {"kvcache", kvcache},
+        {"memory", json{
+            {"context_bytes", metrics.memory_context_bytes},
+            {"model_bytes",   metrics.memory_model_bytes},
+        }},
+    };
 }
 
 // metrics definition: https://prometheus.io/docs/practices/naming/#metric-names

@@ -1898,7 +1898,20 @@ void server_models_routes::init_routes() {
     };
 
     this->proxy_get = [this](const server_http_req & req) {
-        std::string method = "GET";
+        // server-global endpoints (not per-model); skip model name validation
+        if (req.path == "/metrics" || req.path == "/slots") {
+            std::string name = req.get_param("model");
+            // proxy to the first running child so the child's handler decides what to return
+            if (name.empty()) {
+                for (const auto & [n, inst] : models.mapping) {
+                    if (inst.meta.is_running()) {
+                        return models.proxy_request(req, "GET", n, false);
+                    }
+                }
+                // no running model — proceed with empty name and let the child handle it
+            }
+            return models.proxy_request(req, "GET", name, false);
+        }
         std::string name = req.get_param("model");
         bool autoload = is_autoload(params, req);
         auto error_res = std::make_unique<server_http_res>();
@@ -1908,7 +1921,7 @@ void server_models_routes::init_routes() {
         if (autoload) {
             models.ensure_model_ready(name, req.should_stop);
         }
-        return models.proxy_request(req, method, name, false);
+        return models.proxy_request(req, "GET", name, false);
     };
 
     this->proxy_post = [this](const server_http_req & req) {

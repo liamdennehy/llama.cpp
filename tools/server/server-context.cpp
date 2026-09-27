@@ -4689,9 +4689,10 @@ void server_routes::init_routes() {
         for (const auto & [key, value] : req.headers) {
             std::string lowered_key(key.begin(), key.end());
             std::transform(lowered_key.begin(), lowered_key.end(), lowered_key.begin(), [](unsigned char c) { return std::tolower(c); });
-            if (lowered_key == "accept" && value.find("application/json") != std::string::npos) {
-                json_output = true;
-                break;
+            if (lowered_key == "accept") {
+                bool found_json = value.find("application/json") != std::string::npos;
+                fprintf(stderr, "[metrics] Accept header: key=%s value=%s is_json=%d\n", key.c_str(), value.c_str(), (int)found_json);
+                json_output = json_output || found_json;
             }
         }
 
@@ -4704,7 +4705,9 @@ void server_routes::init_routes() {
             res->status = 200;
             if (json_output) {
                 res->content_type = "application/json";
-                res->data = tmp.to_json().dump();
+                json result = json::array();
+                result.push_back(tmp.to_json());
+                res->data = result.dump();
             } else {
                 res->content_type = "text/plain; version=0.0.4";
                 res->data = tmp.to_metrics();
@@ -4750,7 +4753,9 @@ void server_routes::init_routes() {
             res->status = 200;
             if (json_output) {
                 res->content_type = "application/json";
-                res->data = res_task->to_json().dump();
+                json result = json::array();
+                result.push_back(res_task->to_json());
+                res->data = result.dump();
             } else {
                 res->content_type = "text/plain; version=0.0.4";
                 res->data = res_task->to_metrics();

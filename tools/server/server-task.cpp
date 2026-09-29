@@ -1547,7 +1547,7 @@ json server_task_result_metrics::to_json() {
     json kvcache = json::object();
     kvcache["capacity_tokens"] = metrics.kvcache_capacity_tokens;
     kvcache["used_tokens"]    = metrics.kvcache_used_tokens;
-    kvcache["utilization"]    = utilization;
+    kvcache["utilization"]    = std::round(utilization * 10.0) / 10.0;
     kvcache["slots"]          = json::array();
     for (const auto & slot : metrics.kvcache_slots) {
         kvcache["slots"].push_back(json{
@@ -1576,17 +1576,23 @@ json server_task_result_metrics::to_json() {
         {"tokens_per_second",    std::round(predict_tps * 10.0) / 10.0},
     };
 
-    base["decode"] = json{
+    json decode = json{
         {"total",                metrics.n_decode},
         {"n_tokens_max",         metrics.n_tokens_max},
         {"seconds_total",        std::round(metrics.predict_bucket.time / 1e4) / 10.0},
         {"busy_slots_per_decode", std::round(n_busy * 10.0) / 10.0},
-        {"speculative", json{
+    };
+
+    // speculative section only when draft tokens were generated
+    if (metrics.n_draft_tokens > 0 || metrics.n_draft_accepted > 0) {
+        decode["speculative"] = json{
             {"draft_tokens_total",      metrics.n_draft_tokens},
             {"accepted_tokens_total",   metrics.n_draft_accepted},
             {"verification_steps_total", metrics.n_draft_verif_steps},
-        }},
-    };
+        };
+    }
+
+    base["decode"] = decode;
 
     base["kvcache"] = kvcache;
     base["memory"] = json{

@@ -670,7 +670,8 @@ struct common_params {
     // "advanced" endpoints are disabled by default for better security
     bool endpoint_slots   = true;
     bool endpoint_props   = false; // only control POST requests, not GET
-    bool endpoint_metrics = false;
+    bool endpoint_metrics  = false;
+    int32_t metrics_history_size = 0;  // number of recent task stats to retain (0 = disabled, --metrics-history enables with default 10, --metrics-history-size sets exact value, max 1024)
 
     // enable built-in tools
     std::vector<std::string> server_tools;

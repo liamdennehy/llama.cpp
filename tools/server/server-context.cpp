@@ -1309,6 +1309,22 @@ private:
                 if (slot.stats.n_gen > 0) {
                     metrics_on_prediction(slot);
                 }
+                // record recent-task stat for /metrics history
+                if (metrics.history_size > 0 && (slot.stats.n_prompt_processed > 0 || slot.stats.n_gen > 0)) {
+                    server_metrics::task_stat ts;
+                    ts.slot_id         = slot.id;
+                    ts.n_prompt        = slot.prompt.n_tokens();
+                    ts.n_prompt_cached = slot.stats.n_prompt_cached;
+                    ts.n_gen           = slot.stats.n_gen;
+                    ts.prompt_tps      = slot.stats.n_prompt_tps();
+                    ts.gen_tps         = slot.stats.n_gen_tps();
+                    ts.n_draft_tokens  = slot.stats.n_draft_tokens;
+                    ts.n_draft_accepted= slot.stats.n_draft_accepted;
+                    ts.draft_acceptance= ts.n_draft_tokens > 0
+                        ? (double)ts.n_draft_accepted / (double)ts.n_draft_tokens
+                        : 0.0;
+                    metrics.record_task_completion(ts);
+                }
             };
 
             slot.reset();
@@ -1417,6 +1433,7 @@ private:
         });
 
         metrics.init();
+        metrics.history_size = std::min(params_base.metrics_history_size, 1024);
 
         if (params_base.cache_idle_slots) {
             if (params_base.cache_ram_mib == 0) {
@@ -2544,15 +2561,13 @@ private:
                     res->n_tasks_deferred    = queue_tasks.queue_tasks_deferred_size();
                     res->metrics             = metrics;
 
-                    // collect TPS from active slots
-                    for (const server_slot & slot : slots) {
-                        if (slot.is_processing() && slot.stats.is_set()) {
-                            res->recent.push_back({
-                                slot.id,
-                                slot.stats.n_prompt_tps(),
-                                slot.stats.n_gen_tps(),
-                            });
-                        }
+                    // populate recent from completed-task history
+                    for (const auto & hs : metrics.get_history()) {
+                        res->recent.push_back({
+                            hs.slot_id,
+                            hs.prompt_tps,
+                            hs.gen_tps,
+                        });
                     }
 
                     if (task.metrics_reset_bucket) {

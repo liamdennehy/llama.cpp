@@ -481,6 +481,47 @@ struct server_metrics {
     uint64_t n_draft_verif_steps = 0; // Total draft token verification steps by the target model
     std::vector<uint64_t> n_accepted_per_pos; // Accepted tokens per draft position
 
+    // ring buffer of recent completed-task stats
+    struct task_stat {
+        int32_t slot_id              = -1;
+        uint32_t n_prompt            = 0;
+        uint32_t n_prompt_cached     = 0;
+        uint32_t n_gen               = 0;
+        double   prompt_tps          = 0.0;
+        double   gen_tps             = 0.0;
+        uint32_t n_draft_tokens      = 0;
+        uint32_t n_draft_accepted    = 0;
+        double   draft_acceptance    = 0.0;
+    };
+    int32_t history_size         = 0;  // max entries, 0 = disabled, set from params when --metrics is enabled
+    std::vector<task_stat> history;   // ring buffer (capacity == history_size)
+    uint32_t history_idx         = 0;
+    uint32_t history_count       = 0;
+
+    void record_task_completion(const task_stat & stat) {
+        if (history_size <= 0) return;
+        if (history.empty()) {
+            history.resize(history_size);
+        }
+        history[history_idx] = stat;
+        history_idx = (history_idx + 1) % (uint32_t)history_size;
+        if (history_count < (uint32_t)history_size) {
+            history_count++;
+        }
+    }
+
+    // return a copy of history in chronological order (oldest first)
+    std::vector<task_stat> get_history() const {
+        if (history.empty()) return {};
+        std::vector<task_stat> result;
+        result.reserve(history_count);
+        for (uint32_t i = 0; i < history_count; i++) {
+            uint32_t idx = (history_idx - history_count + i + (uint32_t)history.size()) % (uint32_t)history.size();
+            result.push_back(history[idx]);
+        }
+        return result;
+    }
+
     // KV cache metrics (approximate, set in SERVER_TASK_TYPE_METRICS handler)
     uint32_t kvcache_capacity_tokens = 0;  // llama_n_ctx() total KV cache capacity
     uint32_t kvcache_used_tokens     = 0;  // sum of slot.prompt.n_tokens() for processing slots

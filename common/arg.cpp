@@ -3545,6 +3545,22 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         }
     ).set_examples({LLAMA_EXAMPLE_SERVER, LLAMA_EXAMPLE_CLI}).set_env("LLAMA_ARG_CHAT_TEMPLATE_KWARGS"));
     add_opt(common_arg(
+        {"--metrics-history"},
+        string_format("enable recent-task history in /metrics output (default: 10 entries, 0 = disabled)", params.metrics_history_size),
+        [](common_params & params) {
+            if (params.metrics_history_size == 0) {
+                params.metrics_history_size = 10;
+            }
+        }
+    ).set_examples({LLAMA_EXAMPLE_SERVER}).set_env("LLAMA_ARG_METRICS_HISTORY"));
+    add_opt(common_arg(
+        {"--metrics-history-size"}, "N",
+        string_format("exact number of recent-task stats to keep (overrides --metrics-history, max: 1024)", params.metrics_history_size),
+        [](common_params & params, int value) {
+            params.metrics_history_size = value < 0 ? 0 : std::min(value, 1024);
+        }
+    ).set_examples({LLAMA_EXAMPLE_SERVER}).set_env("LLAMA_ARG_METRICS_HISTORY_SIZE"));
+    add_opt(common_arg(
         {"-to", "--timeout"}, "N",
         string_format("server read/write timeout in seconds (default: %d)", params.timeout_read),
         [](common_params & params, int value) {

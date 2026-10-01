@@ -915,6 +915,69 @@ private:
 
     std::unique_ptr<server_prompt_cache> prompt_cache;
 
+    // task runs: cumulative wall-clock processing time across independently
+    // launched requests. child tasks (parallel sampling) are excluded — only
+    // the parent counts as a distinct client-visible request.
+    //
+    // Thread safety (x86_64): all fields are aligned 8-byte primitives.
+    // Reads and writes are atomic at the hardware level. The only concern
+    // is on_request_finish() n==0 path where elapsed, t_run_start, and
+    // active are modified. Writing active last ensures elapsed_at() sees
+    // either full old state (active=true) or full new state (active=false).
+    struct taskruns {
+        const std::vector<server_slot> *slot_list = nullptr;
+        int64_t t_run_start  = 0; // wall-clock when current run began
+        int64_t elapsed      = 0; // accumulated processing time across all runs (us)
+        bool    active       = false;
+
+
+
+        int parent_processing_slots() const {
+            int n = 0;
+            if (!slot_list) {
+                return 0;
+            }
+            for (const auto & slot : *slot_list) {
+                if (slot.is_processing() && !slot.task->is_child()) {
+                    n++;
+                }
+            }
+            return n;
+        }
+
+        bool is_parent_task_running() const {
+            return parent_processing_slots() > 0;
+        }
+
+        // Called by any request when the slot begins processing a task
+        void on_request_start() {
+            if (!active) {
+                t_run_start = (int64_t)ggml_time_us();
+                active      = true;
+            }
+        }
+
+        // Called by any request when it finishes (slot transitions to IDLE)
+        // Handles state transitions: active -> inactive when last task completes
+        void on_request_finish() {
+            int n = parent_processing_slots();
+            if (n == 0) {
+                elapsed += (int64_t)ggml_time_us() - t_run_start;
+                t_run_start = 0;
+                active        = false; // write last — readers see full old or full new state
+            } else if (n == 1) {
+                elapsed += (int64_t)ggml_time_us() - t_run_start;
+            }
+            // n > 1: NOP, other requests still in-flight
+        }
+
+        // Wall-clock duration this metrics snapshot represents
+        int64_t elapsed_at() const {
+            return active ? elapsed + ((int64_t)ggml_time_us() - t_run_start) : elapsed;
+        }
+    };
+
+    taskruns taskruns_state;
     server_metrics metrics;
 
     // queued prompt stats - llama_decode() is async, so the timing is only valid after a sync
@@ -1237,6 +1300,7 @@ private:
         }
 
         slots.clear();
+        taskruns_state.slot_list = &slots;
 
         ctx_tgt_seq_rm_type = common_context_can_seq_rm(ctx_tgt);
         if (ctx_tgt_seq_rm_type == COMMON_CONTEXT_SEQ_RM_TYPE_NO) {
@@ -1308,6 +1372,13 @@ private:
                 // flush the generated token stats before reset()
                 if (slot.stats.n_gen > 0) {
                     metrics_on_prediction(slot);
+                }
+                // track completed request
+                metrics.n_completed++;
+
+                // only parent tasks (non-child) drive task run boundaries
+                if (!slot.task->is_child()) {
+                    taskruns_state.on_request_finish();
                 }
             };
 
@@ -1823,6 +1894,11 @@ private:
         slot.state = slot.task->is_child()
             ? SLOT_STATE_WAIT_OTHER // wait for the parent to process prompt
             : SLOT_STATE_STARTED;
+
+        // only parent tasks (non-child) drive task run boundaries
+        if (!slot.task->is_child()) {
+            taskruns_state.on_request_start();
+        }
 
         // reset server kill-switch counter
         n_empty_consecutive = 0;
@@ -2543,6 +2619,7 @@ private:
                     res->n_processing_slots  = n_processing_slots;
                     res->n_tasks_deferred    = queue_tasks.queue_tasks_deferred_size();
                     res->metrics             = metrics;
+                    res->tasks_duration_us    = taskruns_state.elapsed_at();
 
                     // collect TPS from active slots
                     for (const server_slot & slot : slots) {

@@ -504,6 +504,7 @@ struct server_task_result_metrics : server_task_result {
     std::vector<recent_slot> recent;
 
     server_metrics metrics;
+    int64_t        tasks_duration_us = 0; // wall-clock duration from taskruns
 
     virtual json to_json() override;
 

@@ -1569,8 +1569,10 @@ json server_task_result_metrics::to_json() {
 
     json base = json::object();
     base["tasks"] = json{
-        {"processing", n_processing_slots},
-        {"queued",     n_tasks_deferred},
+        {"processing",     n_processing_slots},
+        {"queued",         n_tasks_deferred},
+        {"completed",      metrics.n_completed},
+        {"duration_seconds", json_round1(std::round(tasks_duration_us / 1e5) / 10.0)},
     };
 
     base["prompt"] = json{
@@ -1595,11 +1597,24 @@ json server_task_result_metrics::to_json() {
 
     // speculative section only when draft tokens were generated
     if (metrics.n_draft_tokens > 0 || metrics.n_draft_accepted > 0) {
-        decode["speculative"] = json{
+        json speculative = json{
             {"draft_tokens_total",      metrics.n_draft_tokens},
             {"accepted_tokens_total",   metrics.n_draft_accepted},
             {"verification_steps_total", metrics.n_draft_verif_steps},
         };
+
+        if (!metrics.n_accepted_per_pos.empty()) {
+            json per_pos = json::array();
+            for (size_t i = 0; i < metrics.n_accepted_per_pos.size(); i++) {
+                per_pos.push_back(json{
+                    {"position", (int)i},
+                    {"count", metrics.n_accepted_per_pos[i]},
+                });
+            }
+            speculative["accepted_tokens_per_pos"] = per_pos;
+        }
+
+        decode["speculative"] = speculative;
     }
 
     base["decode"] = decode;

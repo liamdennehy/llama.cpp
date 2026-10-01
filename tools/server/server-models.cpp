@@ -2032,7 +2032,7 @@ void server_models_routes::init_routes() {
                     } else {
                         // placeholder for unloaded model
                         entry["metrics"] = json{
-                            {"tasks", json{{"processing", 0}, {"queued", 0}}},
+                            {"tasks", json{{"processing", 0}, {"queued", 0}, {"completed", 0}}},
                             {"prompt", json{{"tokens_total", 0}, {"tokens_cached_total", 0}, {"seconds_total", 0.0}, {"tokens_per_second", 0.0}}},
                             {"prediction", json{{"tokens_total", 0}, {"seconds_total", 0.0}, {"tokens_per_second", 0.0}}},
                             {"decode", json{{"total", 0}, {"n_tokens_max", 0}, {"seconds_total", 0.0}, {"busy_slots_per_decode", 0.0}, {"speculative", json{{"draft_tokens_total", 0}, {"accepted_tokens_total", 0}, {"verification_steps_total", 0}}}}},

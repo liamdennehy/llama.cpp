@@ -1569,8 +1569,10 @@ json server_task_result_metrics::to_json() {
 
     json base = json::object();
     base["tasks"] = json{
-        {"processing", n_processing_slots},
-        {"queued",     n_tasks_deferred},
+        {"processing",     n_processing_slots},
+        {"queued",         n_tasks_deferred},
+        {"completed",      metrics.n_completed},
+        {"duration_seconds", json_round1(std::round(tasks_duration_us / 1e5) / 10.0)},
     };
 
     base["prompt"] = json{

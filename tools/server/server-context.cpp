@@ -919,6 +919,53 @@ private:
 
     server_metrics metrics;
 
+#ifdef ENABLE_EXPERIMENTAL_METRICS
+    // task run tracking — cumulative wall-clock processing time
+    struct taskruns {
+        const std::vector<server_slot> *slot_list = nullptr;
+        int64_t  t_run_start = 0;
+        int64_t  elapsed = 0;
+        bool     active = false;
+
+        int parent_processing_slots() const {
+            int n = 0;
+            if (slot_list) {
+                for (const auto & s : *slot_list) {
+                    if (s.is_processing() && !s.task->is_child()) {
+                        n++;
+                    }
+                }
+            }
+            return n;
+        }
+
+        bool is_parent_task_running() const {
+            return active;
+        }
+
+        void on_request_start() {
+            t_run_start = ggml_time_us();
+            active = true;
+        }
+
+        void on_request_finish() {
+            if (t_run_start > 0) {
+                elapsed += ggml_time_us() - t_run_start;
+            }
+            t_run_start = 0;
+            active = false;
+        }
+
+        int64_t elapsed_at() const {
+            int64_t dur = elapsed;
+            if (active && t_run_start > 0) {
+                dur += ggml_time_us() - t_run_start;
+            }
+            return dur;
+        }
+    } taskruns_state;
+#endif
+
     // queued prompt stats - llama_decode() is async, so the timing is only valid after a sync
     // note: kept out of server_metrics, which is copied as-is into the task result
     int64_t  t_decode_start  = 0; // start of the last submitted decode
@@ -1239,6 +1286,10 @@ private:
         }
 
         slots.clear();
+
+#ifdef ENABLE_EXPERIMENTAL_METRICS
+        taskruns_state.slot_list = &slots;
+#endif
 
         ctx_tgt_seq_rm_type = common_context_can_seq_rm(ctx_tgt);
         if (ctx_tgt_seq_rm_type == COMMON_CONTEXT_SEQ_RM_TYPE_NO) {
@@ -1825,6 +1876,12 @@ private:
         slot.state = slot.task->is_child()
             ? SLOT_STATE_WAIT_OTHER // wait for the parent to process prompt
             : SLOT_STATE_STARTED;
+
+#ifdef ENABLE_EXPERIMENTAL_METRICS
+        if (!slot.task->is_child()) {
+            taskruns_state.on_request_start();
+        }
+#endif
 
         // reset server kill-switch counter
         n_empty_consecutive = 0;
@@ -2557,6 +2614,10 @@ private:
                     res->n_processing_slots  = n_processing_slots;
                     res->n_tasks_deferred    = queue_tasks.queue_tasks_deferred_size();
                     res->metrics             = metrics;
+
+#ifdef ENABLE_EXPERIMENTAL_METRICS
+                    res->tasks_duration_us   = taskruns_state.elapsed_at();
+#endif
 
                     if (task.metrics_reset_bucket) {
                         metrics.reset_bucket();
@@ -3929,6 +3990,12 @@ private:
                 // release slot because of stop condition
                 slot.print_timings();
                 send_final_response(slot);
+#ifdef ENABLE_EXPERIMENTAL_METRICS
+                if (!slot.task->is_child()) {
+                    metrics.n_completed++;
+                    taskruns_state.on_request_finish();
+                }
+#endif
                 slot.release();
 
                 return;
@@ -4054,6 +4121,12 @@ private:
                 if (!process_token(result, slot)) {
                     slot.print_timings();
                     send_final_response(slot);
+#ifdef ENABLE_EXPERIMENTAL_METRICS
+                    if (!slot.task->is_child()) {
+                        metrics.n_completed++;
+                        taskruns_state.on_request_finish();
+                    }
+#endif
                     slot.release();
 
                     return;

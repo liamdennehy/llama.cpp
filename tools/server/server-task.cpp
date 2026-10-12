@@ -1572,10 +1572,13 @@ static json server_task_result_metrics_to_json_full(const server_task_result_met
 
     json base = json::object();
     base["context_max"] = m.metrics.kvcache_capacity_tokens;
-    base["tasks"] = json{
-        {"processing", m.n_processing_slots},
-        {"queued",     m.n_tasks_deferred},
+    json tasks = json{
+        {"processing",  m.n_processing_slots},
+        {"queued",      m.n_tasks_deferred},
+        {"completed",   m.metrics.n_completed},
     };
+    tasks["duration_seconds"] = json_round1(std::round(m.tasks_duration_us / 1e5) / 10.0);
+    base["tasks"] = tasks;
 
     // aggregate in-flight token counts from active slots
     uint32_t n_prompt_processing = 0;

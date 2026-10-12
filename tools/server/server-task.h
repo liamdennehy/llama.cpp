@@ -498,6 +498,10 @@ struct server_task_result_metrics : server_task_result {
 
     server_metrics metrics;
 
+#ifdef ENABLE_EXPERIMENTAL_METRICS
+    int64_t tasks_duration_us = 0; // wall-clock duration from taskruns
+#endif
+
     virtual json to_json() override;
 
     struct metric_item {

@@ -61,6 +61,7 @@ add_dependencies(${TARGET} llama-ui-assets)
 if(ENABLE_EXPERIMENTAL_METRICS)
     target_compile_definitions(${TARGET} PRIVATE ENABLE_EXPERIMENTAL_METRICS)
 endif()
+target_compile_definitions(${TARGET} PRIVATE LLAMA_VERSION="${LLAMA_VERSION}")
 
 if(LLAMA_TOOLS_INSTALL)
     install(TARGETS ${TARGET} LIBRARY)

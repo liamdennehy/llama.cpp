@@ -522,6 +522,33 @@ struct server_metrics {
     // memory metrics (set via llama_get_memory_breakdown)
     uint64_t memory_context_bytes = 0;  // context/KV cache buffers across all devices
     uint64_t memory_model_bytes   = 0;  // model weights across all devices
+
+    // ring buffer of recently completed slot stats (filled on slot release)
+#ifndef RECENT_SLOTS_CAPACITY
+#define RECENT_SLOTS_CAPACITY 16
+#endif
+    static const size_t recent_capacity = RECENT_SLOTS_CAPACITY;
+    struct recent_slot {
+        int64_t  t_finish          = 0;  // completion timestamp (us)
+        int      slot_id           = -1;
+        int      task_id           = -1;
+        uint64_t n_prompt_cached   = 0;   // same type as server_slot_stats
+        uint64_t n_prompt_processed = 0;
+        uint64_t n_gen             = 0;
+        uint64_t n_draft_tokens      = 0;
+        uint64_t n_draft_accepted    = 0;
+        int64_t  t_start             = 0;
+        int64_t  t_prompt_last       = 0;
+        int64_t  t_gen_last          = 0;
+        double   prompt_ms           = 0.0;
+        double   gen_ms              = 0.0;
+        double   prompt_tps          = 0.0;
+        double   gen_tps             = 0.0;
+        double   prompt_per_token_ms = 0.0;
+        double   gen_per_token_ms    = 0.0;
+    };
+    std::vector<recent_slot> recent_slots;
+    size_t recent_write_idx = 0;
 #endif
 
     void init() {

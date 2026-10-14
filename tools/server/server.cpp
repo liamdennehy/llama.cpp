@@ -93,6 +93,17 @@ int llama_server(int argc, char ** argv) {
     signal(SIGPIPE, SIG_IGN);
 #endif
 
+    // --version: print version and exit before argument parsing
+#ifdef LLAMA_VERSION
+    for (int i = 1; i < argc; i++) {
+        std::string arg = argv[i];
+        if (arg == "--version") {
+            fprintf(stdout, "llama-server version %s\n", LLAMA_VERSION);
+            return 0;
+        }
+    }
+#endif
+
     // own arguments required by this example
     common_params params;
 

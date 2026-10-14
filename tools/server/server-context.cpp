@@ -739,6 +739,44 @@ struct server_slot {
 
 // returns 0 on success
 // caller need to update prompt.tokens after a successful call to keep track of the processing progress
+#ifdef ENABLE_EXPERIMENTAL_METRICS
+// capture final slot stats into a ring-buffer entry
+// slot must still be in a processing state (called before slot.release())
+static void slot_capture_recent(server_metrics & metrics, const server_slot & slot) {
+    const auto & s = slot.stats;
+    if (!s.is_set()) {
+        return; // never started, nothing to capture
+    }
+
+    server_metrics::recent_slot entry;
+    entry.t_finish       = ggml_time_us();
+    entry.slot_id        = slot.id;
+    entry.task_id        = slot.task ? slot.task->id : -1;
+    entry.n_prompt_cached    = s.n_prompt_cached;
+    entry.n_prompt_processed = s.n_prompt_processed;
+    entry.n_gen              = s.n_gen;
+    entry.n_draft_tokens     = s.n_draft_tokens;
+    entry.n_draft_accepted   = s.n_draft_accepted;
+    entry.t_start            = s.t_start;
+    entry.t_prompt_last      = s.t_prompt_last;
+    entry.t_gen_last         = s.t_gen_last;
+    entry.prompt_ms          = s.t_prompt_ms();
+    entry.gen_ms             = s.t_gen_ms();
+    entry.prompt_tps         = s.n_prompt_tps();
+    entry.gen_tps            = s.n_gen_tps();
+    entry.prompt_per_token_ms = s.t_prompt_per_token_ms();
+    entry.gen_per_token_ms   = s.t_gen_per_token_ms();
+
+    size_t idx = metrics.recent_write_idx % server_metrics::recent_capacity;
+    if (metrics.recent_slots.size() < server_metrics::recent_capacity) {
+        metrics.recent_slots.push_back(std::move(entry));
+    } else {
+        metrics.recent_slots[idx] = std::move(entry);
+    }
+    metrics.recent_write_idx++;
+}
+#endif
+
 // note: this is not a member of server_slot because we want to run it inside yield_to_queue
 //       slot is passed as const to avoid accidental modification of the slot state
 //       some pointers are allowed to be used, they are not used by to_json()
@@ -3994,6 +4032,7 @@ private:
                 if (!slot.task->is_child()) {
                     metrics.n_completed++;
                     taskruns_state.on_request_finish();
+                    slot_capture_recent(metrics, slot);
                 }
 #endif
                 slot.release();
@@ -4125,6 +4164,7 @@ private:
                     if (!slot.task->is_child()) {
                         metrics.n_completed++;
                         taskruns_state.on_request_finish();
+                        slot_capture_recent(metrics, slot);
                     }
 #endif
                     slot.release();

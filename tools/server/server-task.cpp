@@ -1630,6 +1630,31 @@ static json server_task_result_metrics_to_json_full(const server_task_result_met
         {"model_bytes",   m.metrics.memory_model_bytes},
     };
 
+    // recent completed slots — most-recent first
+    json recent = json::array();
+    size_t n = m.metrics.recent_slots.size();
+    for (size_t i = 0; i < n; i++) {
+        // write_idx points to the next write position; walk backwards from there
+        size_t idx = (m.metrics.recent_write_idx + server_metrics::recent_capacity - 1 - i) % server_metrics::recent_capacity;
+        const auto & r = m.metrics.recent_slots[idx];
+        recent.push_back(json{
+            {"task_id",          r.task_id},
+            {"slot",             r.slot_id},
+            {"n_prompt_cached",  r.n_prompt_cached},
+            {"n_prompt_processed", r.n_prompt_processed},
+            {"n_gen",            r.n_gen},
+            {"n_draft_tokens",   r.n_draft_tokens},
+            {"n_draft_accepted", r.n_draft_accepted},
+            {"prompt_ms",        json_round1(r.prompt_ms)},
+            {"gen_ms",           json_round1(r.gen_ms)},
+            {"prompt_tps",       json_round1(r.prompt_tps)},
+            {"gen_tps",          json_round1(r.gen_tps)},
+            {"prompt_per_token_ms", json_round1(r.prompt_per_token_ms)},
+            {"gen_per_token_ms",    json_round1(r.gen_per_token_ms)},
+        });
+    }
+    base["recent"] = recent;
+
     json wrapped = json::object();
     wrapped["metrics"] = base;
     return wrapped;

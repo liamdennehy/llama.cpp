@@ -28,6 +28,15 @@ static json json_round1(double value) {
     return json(std::stod(buf));
 }
 
+static json json_round2(double value) {
+    if (!std::isfinite(value)) {
+        return json(0.0);
+    }
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%.2f", value);
+    return json(std::stod(buf));
+}
+
 //
 // task_params
 //
@@ -1545,10 +1554,15 @@ static const char * slot_state_name(int state) {
 
 static json server_task_result_metrics_to_json_full(const server_task_result_metrics &m) {
 
-    // per-slot context ceiling (all slots share the context window equally)
+    // per-slot context ceiling: unified KV cache = full capacity per slot,
+    // per-slot KV cache = capacity divided by number of slots
     double context_max_slot = 0.0;
     if (m.metrics.kvcache_capacity_tokens > 0 && !m.metrics.kvcache_slots.empty()) {
-        context_max_slot = (double)m.metrics.kvcache_capacity_tokens / (double)m.metrics.kvcache_slots.size();
+        if (m.metrics.kv_unified) {
+            context_max_slot = (double)m.metrics.kvcache_capacity_tokens;
+        } else {
+            context_max_slot = (double)m.metrics.kvcache_capacity_tokens / (double)m.metrics.kvcache_slots.size();
+        }
     }
 
     // kvcache: active tokens only
@@ -1558,15 +1572,45 @@ static json server_task_result_metrics_to_json_full(const server_task_result_met
     // slots: moved out of kvcache, each slot reports its own utilization
     json slots = json::array();
     for (const auto & slot : m.metrics.kvcache_slots) {
+        // n_prompt_processed = tokens actually computed (not from cache)
+        // n_prompt_cached  = tokens already present in KV cache
+        uint64_t total_prompt_tokens = slot.n_prompt_cached + slot.n_prompt_processed;
+        uint64_t total_slot_tokens = slot.n_prompt_cached + slot.n_prompt_processed + slot.n_gen;
+        int64_t context_max_int = (int64_t)std::round(context_max_slot);
+        double ctx_util = context_max_int > 0 ? (double)total_slot_tokens / (double)context_max_int * 100.0 : 0.0;
+
+        // per-state elapsed times
+        double prompt_elapsed_ms = 0.0;
+        if (slot.t_prompt_last > slot.t_start) {
+            prompt_elapsed_ms = (slot.t_prompt_last - slot.t_start) / 1000.0;
+        }
+        double gen_elapsed_ms = 0.0;
+        if (slot.t_gen_last > 0) {
+            gen_elapsed_ms = (slot.t_gen_last - slot.t_prompt_last) / 1000.0;
+        } else if (slot.t_prompt_last > 0) {
+            gen_elapsed_ms = (ggml_time_us() - slot.t_prompt_last) / 1000.0;
+        }
+
+        // TTFT: time from prompt start to first generated token
+        double ttft_ms = 0.0;
+        if (slot.t_gen_first > 0 && slot.t_start > 0) {
+            ttft_ms = (slot.t_gen_first - slot.t_start) / 1000.0;
+        }
+
         slots.push_back(json{
-            {"slot",            slot.slot_id},
-            {"state",           std::to_string(slot.state) + " - " + slot_state_name(slot.state)},
-            {"tokens",          slot.n_tokens},
-            {"context_max",     (int64_t)std::round(context_max_slot)},
-            {"prompt_cached_tokens",    slot.n_prompt_cached},
-            {"prompt_new_tokens",       std::max(0, (int)slot.n_prompt_processed - (int)slot.n_prompt_cached)},
-            {"generated_tokens",        slot.n_gen},
+            {"task_id",             slot.task_id},
+            {"slot",                slot.slot_id},
+            {"state",               std::to_string(slot.state) + " - " + slot_state_name(slot.state)},
+            {"tokens",              total_prompt_tokens},
+            {"tokens_prompt_cached",   slot.n_prompt_cached},
+            {"tokens_prompt_new",        slot.n_prompt_processed},
+            {"tokens_generated",         slot.n_gen},
+            {"context_max",             context_max_int},
+            {"context_utilization",     json_round2(ctx_util)},
             {"elapsed_seconds",         json_round1(std::max(0.0, (ggml_time_us() - slot.t_start) / 1e6))},
+            {"ttft_ms",                 json_round1(ttft_ms)},
+            {"prompt_elapsed_ms",       json_round1(prompt_elapsed_ms)},
+            {"gen_elapsed_ms",          json_round1(gen_elapsed_ms)},
         });
     }
 
@@ -1638,19 +1682,19 @@ static json server_task_result_metrics_to_json_full(const server_task_result_met
         size_t idx = (m.metrics.recent_write_idx + server_metrics::recent_capacity - 1 - i) % server_metrics::recent_capacity;
         const auto & r = m.metrics.recent_slots[idx];
         recent.push_back(json{
-            {"task_id",          r.task_id},
-            {"slot",             r.slot_id},
-            {"n_prompt_cached",  r.n_prompt_cached},
-            {"n_prompt_processed", r.n_prompt_processed},
-            {"n_gen",            r.n_gen},
-            {"n_draft_tokens",   r.n_draft_tokens},
-            {"n_draft_accepted", r.n_draft_accepted},
-            {"prompt_ms",        json_round1(r.prompt_ms)},
-            {"gen_ms",           json_round1(r.gen_ms)},
-            {"prompt_tps",       json_round1(r.prompt_tps)},
-            {"gen_tps",          json_round1(r.gen_tps)},
+            {"task_id",            r.task_id},
+            {"slot",               r.slot_id},
+            {"prompt_cached",      r.n_prompt_cached},
+            {"prompt_new",         r.n_prompt_processed},
+            {"generated",          r.n_gen},
+            {"draft_tokens",       r.n_draft_tokens},
+            {"draft_accepted",     r.n_draft_accepted},
+            {"prompt_ms",          json_round1(r.prompt_ms)},
+            {"gen_ms",             json_round1(r.gen_ms)},
             {"prompt_per_token_ms", json_round1(r.prompt_per_token_ms)},
             {"gen_per_token_ms",    json_round1(r.gen_per_token_ms)},
+            {"prompt_tps",         json_round1(r.prompt_tps)},
+            {"gen_tps",            json_round1(r.gen_tps)},
         });
     }
     base["recent"] = recent;

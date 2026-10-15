@@ -269,6 +269,11 @@ struct server_slot {
     // used to determine the slot that has been used the longest
     int64_t t_last_used = -1;
 
+#ifdef ENABLE_EXPERIMENTAL_METRICS
+    // TTFT: timestamp when the first generated token was emitted (us)
+    int64_t t_gen_first = 0;
+#endif
+
     // generation props
     int32_t n_ctx   = 0;  // context size per slot
     int32_t n_keep  = 0;
@@ -2611,6 +2616,7 @@ private:
                     // KV cache utilization metrics (approximate)
                     if (!slots.empty() && slots[0].ctx_tgt) {
                         metrics.kvcache_capacity_tokens = llama_n_ctx(slots[0].ctx_tgt);
+                        metrics.kv_unified = params_base.kv_unified;
 
                         uint64_t n_used = 0;
                         metrics.kvcache_slots.clear();
@@ -2619,6 +2625,7 @@ private:
                                 n_used += slot.prompt.n_tokens();
                                 metrics.kvcache_slots.push_back({
                                     slot.id,
+                                    slot.task ? slot.task->id : -1,
                                     (int)slot.state,
                                     (uint32_t)slot.prompt.n_tokens(),
                                     (uint32_t)slot.stats.n_prompt_cached,
@@ -2627,6 +2634,7 @@ private:
                                     (int64_t)slot.stats.t_start,
                                     (int64_t)slot.stats.t_prompt_last,
                                     (int64_t)slot.stats.t_gen_last,
+                                    slot.t_gen_first,
                                 });
                             }
                         }
@@ -4011,6 +4019,7 @@ private:
                 slot.stats.update_prompt_last();
                 slot.t_print_last = t_now;
                 slot.n_gen_last = 0;
+                slot.t_gen_first = ggml_time_us();
             }
 
             slot.stats.update_gen_last();
@@ -4156,6 +4165,10 @@ private:
                 // TODO: set result.probs
 
                 slot.stats.n_gen += 1;
+
+                if (slot.stats.n_gen == 1) {
+                    slot.t_gen_first = ggml_time_us();
+                }
 
                 if (!process_token(result, slot)) {
                     slot.print_timings();

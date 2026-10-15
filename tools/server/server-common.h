@@ -505,9 +505,11 @@ struct server_metrics {
     // KV cache metrics (approximate, set in SERVER_TASK_TYPE_METRICS handler)
     uint32_t kvcache_capacity_tokens = 0;  // llama_n_ctx() total KV cache capacity
     uint32_t kvcache_used_tokens     = 0;  // sum of slot.prompt.n_tokens() for processing slots
+    bool kv_unified                  = false; // whether slots share a unified KV cache
 
     struct kvcache_slot {
         int    slot_id            = -1;
+        int    task_id            = -1;
         int    state              = 0;
         uint32_t n_tokens         = 0;
         uint32_t n_prompt_cached  = 0;
@@ -516,6 +518,7 @@ struct server_metrics {
         int64_t  t_start          = 0;
         int64_t  t_prompt_last    = 0;
         int64_t  t_gen_last       = 0;
+        int64_t  t_gen_first      = 0; // timestamp when first gen token was produced
     };
     std::vector<kvcache_slot> kvcache_slots;
 

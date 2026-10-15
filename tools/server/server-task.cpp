@@ -1607,7 +1607,7 @@ static json server_task_result_metrics_to_json_full(const server_task_result_met
             {"tokens_generated",         slot.n_gen},
             {"context_max",             context_max_int},
             {"context_utilization",     json_round2(ctx_util)},
-            {"elapsed_seconds",         json_round1(std::max(0.0, (ggml_time_us() - slot.t_start) / 1e6))},
+            {"elapsed_seconds",         slot.t_start > 0 ? json_round1((ggml_time_us() - slot.t_start) / 1e6) : 0.0},
             {"ttft_ms",                 json_round1(ttft_ms)},
             {"prompt_elapsed_ms",       json_round1(prompt_elapsed_ms)},
             {"gen_elapsed_ms",          json_round1(gen_elapsed_ms)},
